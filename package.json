@@ -4,17 +4,29 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "ts-node src/index.ts",
+    "cron": "ts-node src/cron.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "@langchain/community": "latest",
     "@langchain/core": "latest",
     "@langchain/google-genai": "latest",
     "@langchain/langgraph": "latest",
+    "@langchain/langgraph-checkpoint-sqlite": "^1.0.1",
     "@langchain/tavily": "^1.2.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.5.0",
+    "@types/nodemailer": "^7.0.11",
     "axios": "^1.14.0",
+    "better-sqlite3": "^12.8.0",
     "cheerio": "^1.2.0",
     "dotenv": "^16.4.5",
+    "googleapis": "^171.4.0",
+    "nodemailer": "^8.0.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.2",
     "zod": "^3.23.8"
   },
   "overrides": {
