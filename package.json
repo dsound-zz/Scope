@@ -1,0 +1,23 @@
+{
+  "name": "job-search-agent",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@langchain/community": "latest",
+    "@langchain/core": "latest",
+    "@langchain/google-genai": "latest",
+    "@langchain/langgraph": "latest",
+    "@langchain/tavily": "^1.2.0",
+    "axios": "^1.14.0",
+    "cheerio": "^1.2.0",
+    "dotenv": "^16.4.5",
+    "zod": "^3.23.8"
+  },
+  "overrides": {
+    "@langchain/core": "$@langchain/core"
+  }
+}
