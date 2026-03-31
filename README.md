@@ -1,4 +1,4 @@
-# langgraph-job-agent-ts
+# Scope
 
 An autonomous RAG-driven agent for career discovery. Features cyclic graph logic, Playwright-based dynamic scraping, and personalized matching nodes. Transitioned from Python to a modular TypeScript architecture.
 
