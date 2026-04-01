@@ -1,5 +1,5 @@
 import { Annotation } from "@langchain/langgraph";
-import type { JobLead, MatchedJob, ContactResult } from "./types";
+import type { JobLead, MatchedJob, ContactResult } from "./types.js";
 
 export const AgentState = Annotation.Root({
   // ── Core message history ─────────────────────────────────────

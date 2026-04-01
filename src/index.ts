@@ -1,6 +1,6 @@
 import { StateGraph } from "@langchain/langgraph";
 import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
-import { AgentState } from "./state";
+import { AgentState } from "./state.js";
 import {
   callModel,
   checkAppliedHistoryNode,
@@ -9,8 +9,8 @@ import {
   researchContactNode,
   draftOutreachNode,
   shouldContinue,
-} from "./nodes";
-import { toolNode } from "./tools";
+} from "./nodes.js";
+import { toolNode } from "./tools.js";
 import { HumanMessage } from "@langchain/core/messages";
 import * as dotenv from "dotenv";
 
@@ -138,7 +138,7 @@ async function main() {
   console.log("\n--- Run Finished ---");
 }
 
-// Only run main() when this file is executed directly
-if (require.main === module) {
+import { fileURLToPath } from "url";
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   main();
 }

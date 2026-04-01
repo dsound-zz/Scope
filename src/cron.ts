@@ -9,13 +9,33 @@
  * Run manually:   npx ts-node src/cron.ts
  * GitHub Actions: see .github/workflows/daily_scope.yml
  */
-import { app } from "./index";
+import { app } from "./index.js";
 import { HumanMessage } from "@langchain/core/messages";
 import * as dotenv from "dotenv";
+import { fileURLToPath } from "url";
 
 dotenv.config();
 
 async function runDailySearch(): Promise<void> {
+  // ── Environment Validation ──────────────────────────────────────────────────
+  const required = [
+    "GOOGLE_API_KEY",
+    "TAVILY_API_KEY",
+    "GMAIL_USER",
+    "GMAIL_PASS",
+    "GOOGLE_SHEET_ID",
+  ];
+  const missing = required.filter((key) => !process.env[key]);
+
+  if (missing.length > 0) {
+    console.error("╔══════════════════════════════════════════╗");
+    console.error("║  ❌ ERROR: Missing Configuration Keys   ║");
+    console.error("╚══════════════════════════════════════════╝");
+    console.error(`The following environment variables are required but missing:\n${missing.map((m) => `  - ${m}`).join("\n")}`);
+    console.error("\nCheck your .env file or GitHub Secrets.");
+    process.exit(1);
+  }
+
   const threadId = new Date().toISOString().split("T")[0]; // e.g. "2026-04-01"
   const now = new Date().toLocaleString("en-US", { timeZone: "America/New_York" });
 

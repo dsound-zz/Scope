@@ -1,6 +1,6 @@
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
-import { AgentState } from "./state";
-import { tools } from "./tools";
+import { AgentState } from "./state.js";
+import { getTools } from "./tools.js";
 import { AIMessage, SystemMessage } from "@langchain/core/messages";
 import { chromium } from "playwright";
 import { TavilySearch } from "@langchain/tavily";
@@ -9,18 +9,19 @@ import * as nodemailer from "nodemailer";
 import * as fs from "fs";
 import * as path from "path";
 import * as dotenv from "dotenv";
-import type { MatchedJob, ContactResult } from "./types";
+import type { MatchedJob, ContactResult } from "./types.js";
 
 dotenv.config();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared LLM instance
 // ─────────────────────────────────────────────────────────────────────────────
+const activeTools = getTools();
 const model = new ChatGoogleGenerativeAI({
   model: "gemini-2.5-flash",
   apiKey: process.env.GOOGLE_API_KEY,
   apiVersion: "v1beta",
-}).bindTools(tools);
+}).bindTools(activeTools);
 
 // Unbound model for tasks that don't need tool calling
 const llm = new ChatGoogleGenerativeAI({
@@ -384,7 +385,16 @@ export const researchContactNode = async (state: typeof AgentState.State) => {
     };
   }
 
-  // TavilySearch reads TAVILY_API_KEY from process.env automatically
+  // 3. Initialize Tavily only if we have a key (prevents hard crash)
+  const apiKey = process.env.TAVILY_API_KEY;
+  if (!apiKey) {
+    const msg = "[Contact Research] TAVILY_API_KEY missing — skipping search.";
+    console.warn(`[SCOPE] ${msg}`);
+    return {
+      contacts: [],
+      messages: [new AIMessage(msg)],
+    };
+  }
   const tavilySearch = new TavilySearch({ maxResults: 3 });
 
   const contacts: ContactResult[] = [];
