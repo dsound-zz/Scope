@@ -85,7 +85,7 @@ async function main() {
   const input = {
     messages: [
       new HumanMessage(
-        "Find 5 TypeScript / AI full-stack engineering jobs at NYC or remote startups, posted in the last 7 days. Focus on companies building LLMs, RAG pipelines, or AI agents. Include the full job URL for each."
+        "Find 5 TypeScript / AI full-stack engineering jobs. Location MUST be strictly NYC area OR remote within the United States. Posted in the last 7 days. Focus on companies building LLMs, RAG pipelines, or AI agents. Include the full job URL for each."
       ),
     ],
     candidateProfile: `

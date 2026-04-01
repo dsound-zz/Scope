@@ -1,10 +1,13 @@
-import { Annotation } from "@langchain/langgraph";
+import { Annotation, messagesStateReducer } from "@langchain/langgraph";
 import type { JobLead, MatchedJob, ContactResult } from "./types.js";
+
+import { BaseMessage } from "@langchain/core/messages";
 
 export const AgentState = Annotation.Root({
   // ── Core message history ─────────────────────────────────────
-  messages: Annotation<any[]>({
-    reducer: (x, y) => x.concat(y),
+  messages: Annotation<BaseMessage[]>({
+    reducer: messagesStateReducer,
+    default: () => [],
   }),
 
   // ── Candidate identity ────────────────────────────────────────

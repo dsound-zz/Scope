@@ -329,6 +329,7 @@ Score each eligible job 1–10 based on alignment with:
 - Behavioral / agentic AI (TRACE project)
 - Email parsing with LLMs (NOWHERE project)
 - Full-stack TypeScript / React / Node.js
+- MUST be located in the NYC area or Remote within the United States (reject or heavily penalize if located elsewhere)
 
 Output EXACTLY this JSON block first (no markdown fences needed, use raw JSON), then your narrative:
 
