@@ -2,16 +2,13 @@ import { StateGraph } from "@langchain/langgraph";
 import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
 import { AgentState } from "./state.js";
 import {
-  callModel,
+  searchNode,
   checkAppliedHistoryNode,
   scrapeNode,
   matchNode,
   researchContactNode,
   draftOutreachNode,
-  shouldContinue,
 } from "./nodes.js";
-import { toolNode } from "./tools.js";
-import { HumanMessage } from "@langchain/core/messages";
 import * as dotenv from "dotenv";
 
 dotenv.config();
@@ -24,47 +21,34 @@ dotenv.config();
 const checkpointer = SqliteSaver.fromConnString("./scope_memory.db");
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Graph topology
+// Graph topology — linear pipeline, no LLM-gated branching
 //
 //  __start__
 //      ↓
-//    agent  ←──────────────────────────────┐
-//      ↓ (conditional)                     │
-//   tools ─────────────────────────────────┘  (loop until no more tool calls)
-//      ↓ (no tool calls → continue)
-//  checkAppliedHistory   (Sheets guardrail — flags already-applied companies)
+//   search              (4 controlled Tavily queries — LinkedIn/Indeed/BuiltInNYC/Google Jobs, NYC-only)
 //      ↓
-//    scrape              (stealth Playwright — grabs job description text)
+//  checkAppliedHistory  (Sheets guardrail — flags already-applied/rejected companies)
 //      ↓
-//   matcher              (Gemini scoring ≥ 7/10 → populates matchedJobs)
+//    scrape             (stealth Playwright — grabs full job description text)
 //      ↓
-//  researchContact       (Tavily + Gemini → finds EM/Recruiter names + LinkedIn)
+//   matcher             (Gemini scoring ≥7/10 → populates matchedJobs)
 //      ↓
-//  draftOutreach         (Gemini drafts → Nodemailer digest email to you)
+//  researchContact      (Tavily + Gemini → finds EM/Recruiter names + LinkedIn)
+//      ↓
+//  draftOutreach        (Gemini drafts → Nodemailer digest email to you)
 //      ↓
 //  __end__
 // ─────────────────────────────────────────────────────────────────────────────
 const workflow = new StateGraph(AgentState)
-  .addNode("agent", callModel)
-  .addNode("tools", toolNode)
+  .addNode("search", searchNode)
   .addNode("checkAppliedHistory", checkAppliedHistoryNode)
   .addNode("scrape", scrapeNode)
   .addNode("matcher", matchNode)
   .addNode("researchContact", researchContactNode)
   .addNode("draftOutreach", draftOutreachNode)
 
-  .addEdge("__start__", "agent")
-
-  // After the agent responds: loop through tools or proceed to guardrail
-  .addConditionalEdges("agent", shouldContinue, {
-    tools: "tools",
-    checkAppliedHistory: "checkAppliedHistory",
-  })
-
-  // Tool results always return to the agent for next reasoning step
-  .addEdge("tools", "agent")
-
-  // Linear pipeline after the guardrail
+  .addEdge("__start__", "search")
+  .addEdge("search", "checkAppliedHistory")
   .addEdge("checkAppliedHistory", "scrape")
   .addEdge("scrape", "matcher")
   .addEdge("matcher", "researchContact")
@@ -74,8 +58,31 @@ const workflow = new StateGraph(AgentState)
 export const app = workflow.compile({ checkpointer });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Candidate profile — single source of truth used by both dev runs and cron
+// ─────────────────────────────────────────────────────────────────────────────
+export const CANDIDATE_PROFILE = `
+Name: Demian Sims
+Role: Full-Stack Engineer & AI Architect
+
+Key Projects:
+  - SIGNAL: Production RAG pipeline for UAP (Unidentified Aerial Phenomena) documents
+            (LangChain, TypeScript, vector search, embeddings)
+  - TRACE:  Behavioral AI / agentic study framework — agent orchestration, TypeScript
+  - NOWHERE: LLM-powered email parsing and triage pipeline
+  - LINR:  AI-assisted liner note inference app
+
+Recent Experience:
+  - NEC Laboratories America (2026) — AI-assisted research workflows and internal tooling
+  - Olivie — React, React Native, Express product engineering
+  - Rethink — React, React Native, Express engineering
+
+Core Stack: TypeScript, Node.js, Express, React, Next.js, React Native,
+            LangChain, LangGraph, Playwright, Supabase, PostgreSQL, AWS
+`;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Direct execution (for ad-hoc / development use)
-// For daily scheduled runs, use: npx ts-node src/cron.ts
+// For daily scheduled runs, use: npm run cron
 // ─────────────────────────────────────────────────────────────────────────────
 async function main() {
   console.log("--- SCOPE Agent — Dev Run ---");
@@ -83,28 +90,8 @@ async function main() {
   const threadId = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
 
   const input = {
-    messages: [
-      new HumanMessage(
-        "Find 5 TypeScript / AI full-stack engineering jobs. Location MUST be strictly NYC area OR remote within the United States. Posted in the last 7 days. Focus on companies building LLMs, RAG pipelines, or AI agents. Include the full job URL for each."
-      ),
-    ],
-    candidateProfile: `
-      Name: Demian Sims
-      Role: Full-Stack Engineer & AI Architect
-
-      Key Projects:
-        - SIGNAL: Production RAG pipeline for UAP documents (LangChain, vector search, TypeScript)
-        - TRACE: Behavioral AI / agentic study framework
-        - NOWHERE: LLM-powered email parsing pipeline
-        - LINR: AI-assisted liner note inference app
-
-      Recent Experience:
-        - NEC Laboratories America — AI-assisted research workflows
-        - Avandar Labs — DuckDB-WASM in-browser analytics platform
-
-      Core Stack: TypeScript, Node.js, Express, React, Next.js, React Native,
-                  LangChain, LangGraph, Playwright, Supabase, AWS, PostgreSQL
-    `,
+    messages: [],
+    candidateProfile: CANDIDATE_PROFILE,
     skippedCompanies: [],
     processedJobIds: [],
     matchedJobs: [],

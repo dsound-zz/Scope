@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  SCOPE — launchd Job Definition
+  ════════════════════════════════════════════════════════════════════════════
+
+  INSTALL:
+    cp com.demiansims.scope.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.demiansims.scope.plist
+
+  UNINSTALL:
+    launchctl unload ~/Library/LaunchAgents/com.demiansims.scope.plist
+    rm ~/Library/LaunchAgents/com.demiansims.scope.plist
+
+  MANUAL TRIGGER (test without waiting for 8 AM):
+    launchctl start com.demiansims.scope
+
+  VIEW LOGS:
+    tail -f /tmp/scope.log
+    tail -f /tmp/scope-error.log
+
+  WHY absolute paths:
+    launchd runs in a "naked" shell — your ~/.zshrc, nvm, and PATH are NOT
+    loaded. Every binary must be referenced by its full filesystem path.
+
+  WHY the dotenv load in cron.ts also uses an absolute path:
+    For the same reason — process.cwd() inside launchd will be "/" unless
+    WorkingDirectory is set. cron.ts resolves .env relative to __dirname so
+    it loads correctly regardless of cwd.
+-->
+<plist version="1.0">
+<dict>
+
+  <!-- Unique reverse-DNS label — used by launchctl to identify this job -->
+  <key>Label</key>
+  <string>com.demiansims.scope</string>
+
+  <!-- Run as a Login Agent (runs when the user is logged in) -->
+
+  <!--
+    ProgramArguments:
+      We exec the tsx binary directly with the absolute Node path so that
+      nvm's shims are bypassed. tsx resolves imports via the project-local
+      node_modules, so no global install is required.
+  -->
+  <key>ProgramArguments</key>
+  <array>
+    <!-- Absolute path to the Node binary managed by nvm -->
+    <string>/Users/demiansims/.nvm/versions/node/v20.19.0/bin/node</string>
+    <!-- tsx CLI installed in the project's devDependencies -->
+    <string>/Users/demiansims/Development/job-search-agent/node_modules/.bin/tsx</string>
+    <!-- Entry point for scheduled runs -->
+    <string>/Users/demiansims/Development/job-search-agent/src/cron.ts</string>
+  </array>
+
+  <!-- WorkingDirectory ensures relative paths (e.g. scope_memory.db) resolve correctly -->
+  <key>WorkingDirectory</key>
+  <string>/Users/demiansims/Development/job-search-agent</string>
+
+  <!--
+    EnvironmentVariables:
+    launchd does NOT inherit your shell environment. List every variable that
+    the app needs. These supplement (and override) whatever cron.ts loads from
+    .env — so either approach works, but having them here is the safety net.
+
+    IMPORTANT: fill in the real values or remove keys you do not want to
+    hard-code here (the .env file approach in cron.ts is the primary loader).
+  -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!--
+      PATH must include the nvm Node bin directory so that any child processes
+      (e.g. Playwright browser launchers) can find node/npm.
+    -->
+    <key>PATH</key>
+    <string>/Users/demiansims/.nvm/versions/node/v20.19.0/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+
+    <!--
+      HOME is needed by some libraries (playwright, keychain helpers, etc.)
+      and is not set in the default launchd environment for agents.
+    -->
+    <key>HOME</key>
+    <string>/Users/demiansims</string>
+
+    <!--
+      Playwright looks up browsers via HOME by default. Pinning this path
+      explicitly prevents it from searching in a wrong location when launchd
+      has an unexpected HOME or cwd.
+    -->
+    <key>PLAYWRIGHT_BROWSERS_PATH</key>
+    <string>/Users/demiansims/Library/Caches/ms-playwright</string>
+  </dict>
+
+  <!-- Fire every day at 08:00 local time -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>8</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <!-- Do NOT run immediately when the plist is loaded (only on schedule) -->
+  <key>RunAtLoad</key>
+  <false/>
+
+  <!-- stdout and stderr go to separate log files in /tmp for easy tailing -->
+  <key>StandardOutPath</key>
+  <string>/tmp/scope.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/scope-error.log</string>
+
+</dict>
+</plist>

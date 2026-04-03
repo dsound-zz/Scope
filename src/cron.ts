@@ -1,20 +1,22 @@
 /**
  * SCOPE — Daily Cron Runner
  *
- * This is the entry point for scheduled/automated execution.
+ * Entry point for scheduled/automated execution.
  * Thread ID is set to today's date (YYYY-MM-DD) so that:
  *   - Re-runs on the same day resume from the last checkpoint state
  *   - Each new day starts a fresh run automatically
  *
- * Run manually:   npx ts-node src/cron.ts
- * GitHub Actions: see .github/workflows/daily_scope.yml
+ * Run manually:   npm run cron
+ * launchd:        see com.demiansims.scope.plist in the project root
  */
-import { app } from "./index.js";
-import { HumanMessage } from "@langchain/core/messages";
+import { app, CANDIDATE_PROFILE } from "./index.js";
 import * as dotenv from "dotenv";
+import * as path from "path";
 import { fileURLToPath } from "url";
 
-dotenv.config();
+// ── Load .env from the project root (critical for launchd / "naked" envs) ───
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
 
 async function runDailySearch(): Promise<void> {
   // ── Environment Validation ──────────────────────────────────────────────────
@@ -23,7 +25,6 @@ async function runDailySearch(): Promise<void> {
     "TAVILY_API_KEY",
     "GMAIL_USER",
     "GMAIL_PASS",
-    "GOOGLE_SHEET_ID",
   ];
   const missing = required.filter((key) => !process.env[key]);
 
@@ -31,12 +32,14 @@ async function runDailySearch(): Promise<void> {
     console.error("╔══════════════════════════════════════════╗");
     console.error("║  ❌ ERROR: Missing Configuration Keys   ║");
     console.error("╚══════════════════════════════════════════╝");
-    console.error(`The following environment variables are required but missing:\n${missing.map((m) => `  - ${m}`).join("\n")}`);
-    console.error("\nCheck your .env file or GitHub Secrets.");
+    console.error(
+      `The following environment variables are required but missing:\n${missing.map((m) => `  - ${m}`).join("\n")}`
+    );
+    console.error("\nCheck your .env file or the launchd EnvironmentVariables block.");
     process.exit(1);
   }
 
-  const threadId = new Date().toISOString().split("T")[0]; // e.g. "2026-04-01"
+  const threadId = new Date().toISOString().split("T")[0]; // e.g. "2026-04-03"
   const now = new Date().toLocaleString("en-US", { timeZone: "America/New_York" });
 
   console.log("╔══════════════════════════════════════════╗");
@@ -46,30 +49,8 @@ async function runDailySearch(): Promise<void> {
   console.log(`Start:  ${now}\n`);
 
   const input = {
-    messages: [
-      new HumanMessage(
-        `Find 5 TypeScript / AI full-stack engineering jobs. Location MUST be strictly NYC area OR remote within the United States. 
-Posted in the last 7 days. Focus on companies building with LLMs, RAG pipelines, 
-or AI agents. Include the full public URL for each job posting.`
-      ),
-    ],
-    candidateProfile: `
-      Name: Demian Sims
-      Role: Full-Stack Engineer & AI Architect
-
-      Key Projects:
-        - SIGNAL: Production RAG pipeline for UAP documents (LangChain, vector search, TypeScript)
-        - TRACE: Behavioral AI / agentic study framework
-        - NOWHERE: LLM-powered email parsing pipeline
-        - LINR: AI-assisted liner note inference app
-
-      Recent Experience:
-        - NEC Laboratories America — AI-assisted research workflows
-        - Avandar Labs — DuckDB-WASM in-browser analytics platform
-
-      Core Stack: TypeScript, Node.js, Express, React, Next.js, React Native,
-                  LangChain, LangGraph, Playwright, Supabase, AWS, PostgreSQL
-    `,
+    messages: [],
+    candidateProfile: CANDIDATE_PROFILE,
     skippedCompanies: [],
     processedJobIds: [],
     matchedJobs: [],
@@ -95,7 +76,9 @@ or AI agents. Include the full public URL for each job posting.`
         const contact = contacts.find((c: any) => c.company === j.company);
         console.log(`  [${j.score}/10] ${j.title} @ ${j.company}`);
         if (contact?.contactName) {
-          console.log(`          Contact: ${contact.contactName} — ${contact.linkedInUrl ?? "no LinkedIn"}`);
+          console.log(
+            `          Contact: ${contact.contactName} — ${contact.linkedInUrl ?? "no LinkedIn"}`
+          );
         }
       });
     } else {

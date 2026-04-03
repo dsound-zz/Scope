@@ -1,9 +1,8 @@
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
-import { AgentState } from "./state.js";
-import { getTools } from "./tools.js";
-import { AIMessage, SystemMessage } from "@langchain/core/messages";
-import { chromium } from "playwright";
 import { TavilySearch } from "@langchain/tavily";
+import { AgentState } from "./state.js";
+import { AIMessage } from "@langchain/core/messages";
+import { chromium } from "playwright";
 import { google } from "googleapis";
 import * as nodemailer from "nodemailer";
 import * as fs from "fs";
@@ -14,16 +13,32 @@ import type { MatchedJob, ContactResult } from "./types.js";
 dotenv.config();
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Shared LLM instance
+// Constants
 // ─────────────────────────────────────────────────────────────────────────────
-const activeTools = getTools();
-const model = new ChatGoogleGenerativeAI({
-  model: "gemini-2.5-flash",
-  apiKey: process.env.GOOGLE_API_KEY,
-  apiVersion: "v1beta",
-}).bindTools(activeTools);
 
-// Unbound model for tasks that don't need tool calling
+/** Sheet ID for the applied/rejection tracker */
+const REJECTION_SHEET_ID = "1ip0NQkpQi3ovk2OeNy9aPbRpeIEs7ZNRwz5EtHDvZgU";
+
+/** Approved job board domains — all other sites are ignored */
+const APPROVED_DOMAINS = [
+  "linkedin.com",
+  "indeed.com",
+  "builtinnyc.com",
+  "jobs.google.com",
+];
+
+/** Domains that should never be scraped (error pages, auth redirects, API consoles) */
+const SCRAPE_BLOCKLIST = [
+  "console.developers.google.com",
+  "console.cloud.google.com",
+  "accounts.google.com",
+  "googleapis.com",
+  "oauth2.googleapis.com",
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared LLM instance (no tools bound — used for scoring/drafting)
+// ─────────────────────────────────────────────────────────────────────────────
 const llm = new ChatGoogleGenerativeAI({
   model: "gemini-2.5-flash",
   apiKey: process.env.GOOGLE_API_KEY,
@@ -34,15 +49,8 @@ const llm = new ChatGoogleGenerativeAI({
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Resolve Google service-account credentials.
- *
- * Resolution order:
- *  1. GOOGLE_SERVICE_ACCOUNT_JSON   – raw JSON string in env
- *  2. GOOGLE_SERVICE_ACCOUNT_PATH   – path to a JSON key file
- *  3. ./service-account.json        – file placed at the project root (default)
- */
 function getGoogleAuth(): InstanceType<typeof google.auth.GoogleAuth> | null {
-  let credentials: any;
+  let credentials: Record<string, unknown>;
 
   if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
     try {
@@ -53,13 +61,14 @@ function getGoogleAuth(): InstanceType<typeof google.auth.GoogleAuth> | null {
     }
   } else if (process.env.GOOGLE_SERVICE_ACCOUNT_PATH) {
     try {
-      credentials = JSON.parse(fs.readFileSync(process.env.GOOGLE_SERVICE_ACCOUNT_PATH, "utf8"));
+      credentials = JSON.parse(
+        fs.readFileSync(process.env.GOOGLE_SERVICE_ACCOUNT_PATH, "utf8")
+      );
     } catch {
       console.warn("[SCOPE] Could not read GOOGLE_SERVICE_ACCOUNT_PATH — skipping Sheets guardrail.");
       return null;
     }
   } else {
-    // Default: look for service-account.json in the project root
     const defaultPath = path.resolve(process.cwd(), "service-account.json");
     if (fs.existsSync(defaultPath)) {
       try {
@@ -81,7 +90,6 @@ function getGoogleAuth(): InstanceType<typeof google.auth.GoogleAuth> | null {
   });
 }
 
-/** Build the HTML body for the digest email */
 function buildDigestHtml(
   drafts: Array<{ job: MatchedJob; contact?: ContactResult; emailBody: string }>,
   date: Date
@@ -101,22 +109,22 @@ function buildDigestHtml(
           ${i + 1}. ${d.job.title} @ <span style="color:#6366f1;">${d.job.company}</span>
           <span style="font-size:14px;color:#059669;margin-left:8px;">Score: ${d.job.score}/10</span>
         </h2>
-        <p style="margin:4px 0;color:#6b7280;font-size:13px;">💡 ${d.job.matchReason}</p>
+        <p style="margin:4px 0;color:#6b7280;font-size:13px;">&#x1F4A1; ${d.job.matchReason}</p>
         ${
           d.contact?.contactName
             ? `<p style="margin:6px 0;font-size:13px;">
-                👤 Contact: <strong>${d.contact.contactName}</strong> (${d.contact.contactRole || "Engineering"})
-                ${d.contact.linkedInUrl ? `— <a href="${d.contact.linkedInUrl}" style="color:#6366f1;">LinkedIn</a>` : ""}
+                &#x1F464; Contact: <strong>${d.contact.contactName}</strong> (${d.contact.contactRole ?? "Engineering"})
+                ${d.contact.linkedInUrl ? `&#x2014; <a href="${d.contact.linkedInUrl}" style="color:#6366f1;">LinkedIn</a>` : ""}
                </p>`
             : ""
         }
         ${
           d.job.url
-            ? `<p style="margin:4px 0;font-size:13px;">🔗 <a href="${d.job.url}" style="color:#6366f1;">View Job Posting</a></p>`
+            ? `<p style="margin:4px 0;font-size:13px;">&#x1F517; <a href="${d.job.url}" style="color:#6366f1;">View Job Posting</a></p>`
             : ""
         }
         <hr style="margin:14px 0;border:none;border-top:1px solid #e5e7eb;">
-        <h3 style="margin:0 0 8px;color:#374151;font-size:15px;">✉️ Draft Outreach Email</h3>
+        <h3 style="margin:0 0 8px;color:#374151;font-size:15px;">&#x2709;&#xFE0F; Draft Outreach Email</h3>
         <div style="background:white;padding:16px;border-radius:4px;font-family:ui-monospace,monospace;font-size:13px;white-space:pre-wrap;border:1px solid #e5e7eb;line-height:1.6;">${d.emailBody
           .trim()
           .replace(/</g, "&lt;")
@@ -130,161 +138,234 @@ function buildDigestHtml(
 <html>
 <body style="font-family:system-ui,-apple-system,sans-serif;max-width:760px;margin:0 auto;padding:32px;color:#111827;background:#fff;">
   <div style="border-bottom:2px solid #6366f1;padding-bottom:16px;margin-bottom:24px;">
-    <h1 style="color:#4f46e5;margin:0 0 6px;font-size:24px;">🎯 SCOPE Daily Report</h1>
-    <p style="color:#6b7280;margin:0;">${dateStr} · ${drafts.length} high-scoring match${drafts.length !== 1 ? "es" : ""} ready for your review</p>
+    <h1 style="color:#4f46e5;margin:0 0 6px;font-size:24px;">SCOPE Daily Report</h1>
+    <p style="color:#6b7280;margin:0;">${dateStr} &middot; ${drafts.length} high-scoring match${drafts.length !== 1 ? "es" : ""} ready for your review</p>
   </div>
   ${items}
   <p style="color:#d1d5db;font-size:11px;margin-top:32px;border-top:1px solid #f3f4f6;padding-top:16px;">
-    Generated by SCOPE Autonomous Job Agent · Do not reply to this message.
+    Generated by SCOPE Autonomous Job Agent &middot; Do not reply to this message.
   </p>
 </body>
 </html>`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Node 1: callModel — Main LLM orchestrator
+// Node 1: searchNode — Controlled Tavily queries scoped to approved job boards
 // ─────────────────────────────────────────────────────────────────────────────
-export const callModel = async (state: typeof AgentState.State) => {
-  const systemPrompt = new SystemMessage(
-    "You are a professional recruiter assistant. After using tools to find jobs, list them clearly and always include the full HTTP URL for each job so it can be scraped for details."
-  );
 
-  // Strip any accumulated system messages from previous node runs —
-  // LangChain requires the system message to be at index 0 only.
-  const safeMessages = state.messages.filter(
-    (m: any) => !(m instanceof SystemMessage) && m?.role !== "system"
-  );
+/**
+ * Runs 4 deterministic Tavily queries — one per approved job board — each
+ * hard-coded to "New York City" so location drift is impossible.
+ * Results are concatenated into one message and passed downstream.
+ */
+export const searchNode = async (_state: typeof AgentState.State) => {
+  const apiKey = process.env.TAVILY_API_KEY;
+  if (!apiKey) {
+    const msg = "[Search] TAVILY_API_KEY missing — cannot run job search.";
+    console.error(`[SCOPE] ${msg}`);
+    return { messages: [new AIMessage(msg)] };
+  }
 
-  const response = await model.invoke([systemPrompt, ...safeMessages]);
-  return { messages: [response] };
+  // Each query targets exactly one approved site and hard-pins New York City.
+  const queries: string[] = [
+    'site:linkedin.com/jobs "New York City" (TypeScript OR "AI engineer" OR "full stack engineer" OR LangChain OR "machine learning engineer")',
+    'site:indeed.com "New York, NY" (TypeScript OR LangChain OR "AI engineer" OR "full stack" OR "software engineer")',
+    'site:builtinnyc.com (TypeScript OR "AI engineer" OR "full stack" OR LangChain OR "machine learning")',
+    'site:jobs.google.com "New York City" (TypeScript OR "AI engineer" OR LangChain OR "full stack engineer")',
+  ];
+
+  const tavily = new TavilySearch({
+    maxResults: 5,
+    includeDomains: APPROVED_DOMAINS,
+  });
+
+  const allResults: string[] = [];
+
+  for (const query of queries) {
+    try {
+      console.log(`[SCOPE] Searching: ${query.slice(0, 80)}…`);
+      const result = await tavily.invoke({ query });
+      const text = typeof result === "string" ? result : JSON.stringify(result);
+      allResults.push(`--- Query: ${query}\n${text}`);
+    } catch (err: any) {
+      console.warn(`[SCOPE] Search query failed: ${err.message ?? err}`);
+    }
+  }
+
+  if (allResults.length === 0) {
+    return {
+      messages: [
+        new AIMessage("[Search] All queries failed. Check TAVILY_API_KEY and network connectivity."),
+      ],
+    };
+  }
+
+  const combined = allResults.join("\n\n");
+  console.log(
+    `[SCOPE] Search complete — ${allResults.length}/${queries.length} queries succeeded.`
+  );
+  return {
+    messages: [
+      new AIMessage(
+        `[Search] Job listings from LinkedIn, Indeed, BuiltInNYC, and Google Jobs (NYC only):\n\n${combined}`
+      ),
+    ],
+  };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Node 2: checkAppliedHistoryNode — Google Sheets guardrail
+// Reads Column A of "By Company" tab in the rejection tracker sheet.
 // ─────────────────────────────────────────────────────────────────────────────
-export const checkAppliedHistoryNode = async (state: typeof AgentState.State) => {
+export const checkAppliedHistoryNode = async (_state: typeof AgentState.State) => {
   const auth = getGoogleAuth();
 
   if (!auth) {
-    // Graceful no-op — continue without filtering
     return {
-      skippedCompanies: [],
-      messages: [new AIMessage("[Sheets guardrail] No credentials configured — skipping duplicate check.")],
+      skippedCompanies: [] as string[],
+      messages: [
+        new AIMessage("[Sheets guardrail] No credentials configured — skipping duplicate check."),
+      ],
     };
   }
 
   try {
     const sheets = google.sheets({ version: "v4", auth });
 
+    // Column A only — company names are the source of truth for rejections
     const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      // Reads all columns from the applied/rejected tracking sheet
-      range: "By Company!A:Z",
+      spreadsheetId: REJECTION_SHEET_ID,
+      range: "By Company!A:A",
     });
 
     const rows = response.data.values ?? [];
-    // Normalize: flatten all cells, lower-case, de-dupe, drop header row
-    const appliedCompanies = [
+
+    // Skip header row (row 0); read only column A (index 0)
+    const appliedCompanies: string[] = [
       ...new Set(
         rows
-          .slice(1) // skip header
-          .flat()
-          .map((c: string) => c?.toString().toLowerCase().trim())
+          .slice(1)
+          .map((row: string[]) => row[0]?.toString().toLowerCase().trim())
           .filter(Boolean)
       ),
-    ] as string[];
+    ];
 
     const msg =
       appliedCompanies.length > 0
-        ? `[Sheets guardrail] Already applied to ${appliedCompanies.length} companies. Will skip matches from: ${appliedCompanies.slice(0, 8).join(", ")}${appliedCompanies.length > 8 ? "…" : ""}`
+        ? `[Sheets guardrail] Already applied/rejected at ${appliedCompanies.length} companies. Skipping: ${appliedCompanies.slice(0, 8).join(", ")}${appliedCompanies.length > 8 ? "…" : ""}`
         : "[Sheets guardrail] No previously-applied companies found — all leads are eligible.";
 
     console.log(`[SCOPE] ${msg}`);
-    return {
-      skippedCompanies: appliedCompanies,
-      messages: [new AIMessage(msg)],
-    };
+    return { skippedCompanies: appliedCompanies, messages: [new AIMessage(msg)] };
   } catch (err: any) {
     const msg = `[Sheets guardrail] Could not read sheet: ${err.message ?? err}. Continuing without filter.`;
     console.warn(`[SCOPE] ${msg}`);
-    return {
-      skippedCompanies: [],
-      messages: [new AIMessage(msg)],
-    };
+    return { skippedCompanies: [] as string[], messages: [new AIMessage(msg)] };
   }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Node 3: scrapeNode — Stealth Playwright scraper
+// Node 3: scrapeNode — Stealth Playwright scraper (multi-URL, per-URL try-catch)
 // ─────────────────────────────────────────────────────────────────────────────
-// Domains that should never be scraped (error pages, auth redirects, API consoles, etc.)
-const SCRAPE_BLOCKLIST = [
-  "console.developers.google.com",
-  "console.cloud.google.com",
-  "accounts.google.com",
-  "googleapis.com",
-  "oauth2.googleapis.com",
-];
+
+const STEALTH_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 export const scrapeNode = async (state: typeof AgentState.State) => {
-  const lastMessage = state.messages[state.messages.length - 1].content;
-  const urlMatch = (lastMessage as string).match(/https?:\/\/[^\s)"<]+/);
-  if (!urlMatch) {
-    return { messages: [{ role: "assistant", content: "No URL found to scrape." }] };
-  }
+  // Collect all URLs mentioned in any message so far
+  const allContent = state.messages
+    .map((m: any) =>
+      typeof m.content === "string" ? m.content : JSON.stringify(m.content)
+    )
+    .join("\n");
 
-  const url = urlMatch[0];
+  const rawUrls = [...allContent.matchAll(/https?:\/\/[^\s)"<\]]+/g)].map(
+    (m) => m[0].replace(/[.,;]+$/, "") // strip trailing punctuation
+  );
 
-  // Guard: skip non-job URLs that leaked from error messages
-  if (SCRAPE_BLOCKLIST.some((domain) => url.includes(domain))) {
-    console.warn(`[SCOPE] Blocked scrape of non-job URL: ${url}`);
-    return { messages: [new AIMessage(`[Scrape] Skipped blocked domain: ${url}`)] };
-  }
+  const eligibleUrls = [
+    ...new Set(
+      rawUrls.filter(
+        (url) =>
+          APPROVED_DOMAINS.some((d) => url.includes(d)) &&
+          !SCRAPE_BLOCKLIST.some((d) => url.includes(d))
+      )
+    ),
+  ].slice(0, 5); // cap at 5 to avoid excessive run time
 
-  console.log(`[SCOPE] Scraping: ${url}`);
-
-  const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({
-    // Stealth: realistic fingerprint
-    userAgent:
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-    viewport: { width: 1280, height: 800 },
-    locale: "en-US",
-    timezoneId: "America/New_York",
-    extraHTTPHeaders: {
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9",
-      "sec-ch-ua": '"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"',
-      "sec-ch-ua-mobile": "?0",
-      "sec-ch-ua-platform": '"macOS"',
-    },
-  });
-
-  // Stealth: remove webdriver flag before any page script runs
-  await context.addInitScript(() => {
-    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-    // @ts-ignore
-    delete window.__playwright;
-    // @ts-ignore
-    delete window.__pw_manual;
-  });
-
-  const page = await context.newPage();
-
-  try {
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
-    const bodyText = await page.innerText("body");
-    const cleanText = bodyText.replace(/\s+/g, " ").slice(0, 10000);
-    await browser.close();
-    console.log(`[SCOPE] Scraped ${cleanText.length} chars from ${url}`);
-    return { messages: [new AIMessage(`PAGE CONTENT:\n\n${cleanText}`)] };
-  } catch (error: any) {
-    await browser.close();
-    console.warn(`[SCOPE] Scrape failed for ${url}: ${error.message}`);
+  if (eligibleUrls.length === 0) {
     return {
-      messages: [{ role: "assistant", content: `Scrape failed for ${url}. Proceeding with search snippet.` }],
+      messages: [
+        new AIMessage(
+          "[Scrape] No eligible job URLs found in search results — proceeding with snippets only."
+        ),
+      ],
     };
   }
+
+  console.log(`[SCOPE] Scraping ${eligibleUrls.length} URLs…`);
+
+  const browser = await chromium.launch({ headless: true });
+
+  let context: Awaited<ReturnType<typeof browser.newContext>> | null = null;
+  try {
+    context = await browser.newContext({
+      userAgent: STEALTH_UA,
+      viewport: { width: 1280, height: 800 },
+      locale: "en-US",
+      timezoneId: "America/New_York",
+      extraHTTPHeaders: {
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "sec-ch-ua": '"Google Chrome";v="124", "Not:A-Brand";v="8", "Chromium";v="124"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"macOS"',
+        "Upgrade-Insecure-Requests": "1",
+      },
+    });
+
+    // Remove all Playwright fingerprints before any page script runs
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      // @ts-ignore
+      delete window.__playwright;
+      // @ts-ignore
+      delete window.__pw_manual;
+    });
+  } catch (err: any) {
+    console.warn(`[SCOPE] Failed to create browser context: ${err.message}`);
+    await browser.close();
+    return {
+      messages: [new AIMessage("[Scrape] Browser context creation failed — proceeding with snippets.")],
+    };
+  }
+
+  const scrapedPages: string[] = [];
+
+  for (const url of eligibleUrls) {
+    const page = await context.newPage();
+    try {
+      console.log(`[SCOPE] Scraping: ${url}`);
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      const bodyText = await page.innerText("body");
+      const cleanText = bodyText.replace(/\s+/g, " ").slice(0, 4_000);
+      scrapedPages.push(`URL: ${url}\n${cleanText}`);
+      console.log(`[SCOPE]  → ${cleanText.length} chars`);
+    } catch (err: any) {
+      console.warn(`[SCOPE] Scrape failed for ${url}: ${err.message}`);
+      scrapedPages.push(`URL: ${url}\n[Scrape failed — using search snippet only]`);
+    } finally {
+      await page.close().catch(() => {});
+    }
+  }
+
+  await browser.close().catch(() => {});
+
+  const combined = scrapedPages.join("\n\n===\n\n");
+  return {
+    messages: [new AIMessage(`SCRAPED JOB PAGES:\n\n${combined}`)],
+  };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -293,14 +374,14 @@ export const scrapeNode = async (state: typeof AgentState.State) => {
 export const matchNode = async (state: typeof AgentState.State) => {
   const skipped = state.skippedCompanies ?? [];
 
-  // Collect job lead content from ALL messages — agent responses, tool outputs, and scraped pages.
-  // This ensures Tavily results are included even when scraping partially fails.
   const jobLeadsText = state.messages
     .filter((m: any) => {
       const role = m?.role ?? (m?.constructor?.name === "AIMessage" ? "assistant" : "");
       return role === "assistant" || role === "tool";
     })
-    .map((m: any) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+    .map((m: any) =>
+      typeof m.content === "string" ? m.content : JSON.stringify(m.content)
+    )
     .filter((c: string) => c.trim().length > 20)
     .join("\n\n---\n\n");
 
@@ -311,7 +392,7 @@ export const matchNode = async (state: typeof AgentState.State) => {
 
   const skipNote =
     skipped.length > 0
-      ? `IMPORTANT: Skip any jobs from these companies (already applied): ${skipped.join(", ")}.`
+      ? `IMPORTANT: Skip any jobs from these companies (already applied or rejected): ${skipped.join(", ")}.`
       : "";
 
   const prompt = `You are a technical recruiter scoring job-to-candidate fit.
@@ -322,16 +403,18 @@ ${state.candidateProfile}
 ${skipNote}
 
 JOB LEADS (from search results and scraped pages):
-${jobLeadsText.slice(0, 12000)}
+${jobLeadsText.slice(0, 14_000)}
 
-Score each eligible job 1–10 based on alignment with:
-- RAG pipelines & LLM orchestration (SIGNAL project)
-- Behavioral / agentic AI (TRACE project)
+Score each eligible job 1–10 based on alignment with the candidate. Scoring criteria:
+- LLM orchestration / RAG pipelines (SIGNAL project — LangChain, TypeScript, vector search)
+- Behavioral / agentic AI systems (TRACE project)
 - Email parsing with LLMs (NOWHERE project)
-- Full-stack TypeScript / React / Node.js
-- MUST be located in the NYC area or Remote within the United States (reject or heavily penalize if located elsewhere)
+- Full-stack TypeScript / React / React Native / Node.js / Express (Olivie, Rethink)
+- AI-assisted research tooling (NEC Laboratories America, 2026)
+- LOCATION FILTER: MUST be New York City metro area OR US-remote. Penalize non-NYC, non-remote roles to ≤3.
+- SITE FILTER: MUST come from LinkedIn, Indeed, BuiltInNYC, or Google Jobs. Ignore all others.
 
-Output EXACTLY this JSON block first (no markdown fences needed, use raw JSON), then your narrative:
+Output EXACTLY this JSON block first (raw JSON, no markdown fences):
 
 MATCHES_JSON_START
 [
@@ -355,14 +438,15 @@ Then write your full narrative analysis below.`;
 
   const content = typeof response.content === "string" ? response.content : "";
 
-  // Parse the structured block
   let matchedJobs: MatchedJob[] = [];
   const jsonMatch = content.match(/MATCHES_JSON_START\s*([\s\S]*?)\s*MATCHES_JSON_END/);
   if (jsonMatch) {
     try {
-      const parsed: any[] = JSON.parse(jsonMatch[1]);
-      matchedJobs = parsed.filter((j) => (j.score ?? 0) >= 7) as MatchedJob[];
-      console.log(`[SCOPE] matchNode: ${parsed.length} jobs scored, ${matchedJobs.length} qualify (≥7/10).`);
+      const parsed: MatchedJob[] = JSON.parse(jsonMatch[1]);
+      matchedJobs = parsed.filter((j) => (j.score ?? 0) >= 7);
+      console.log(
+        `[SCOPE] matchNode: ${parsed.length} jobs scored, ${matchedJobs.length} qualify (≥7/10).`
+      );
     } catch (e) {
       console.warn("[SCOPE] matchNode: Failed to parse MATCHES_JSON:", e);
     }
@@ -381,29 +465,28 @@ export const researchContactNode = async (state: typeof AgentState.State) => {
 
   if (matchedJobs.length === 0) {
     return {
-      contacts: [],
-      messages: [new AIMessage("[Contact Research] No high-scoring matches to research — skipping.")],
+      contacts: [] as ContactResult[],
+      messages: [
+        new AIMessage("[Contact Research] No high-scoring matches to research — skipping."),
+      ],
     };
   }
 
-  // 3. Initialize Tavily only if we have a key (prevents hard crash)
   const apiKey = process.env.TAVILY_API_KEY;
   if (!apiKey) {
-    const msg = "[Contact Research] TAVILY_API_KEY missing — skipping search.";
+    const msg = "[Contact Research] TAVILY_API_KEY missing — skipping.";
     console.warn(`[SCOPE] ${msg}`);
-    return {
-      contacts: [],
-      messages: [new AIMessage(msg)],
-    };
+    return { contacts: [] as ContactResult[], messages: [new AIMessage(msg)] };
   }
-  const tavilySearch = new TavilySearch({ maxResults: 3 });
 
+  const tavilySearch = new TavilySearch({ maxResults: 3 });
   const contacts: ContactResult[] = [];
 
   for (const job of matchedJobs) {
-    // Skip already-applied companies
     if (
-      skippedCompanies.some((c) => c.toLowerCase().includes(job.company.toLowerCase()))
+      skippedCompanies.some((c) =>
+        c.toLowerCase().includes(job.company.toLowerCase())
+      )
     ) {
       console.log(`[SCOPE] Skipping contact research for ${job.company} (already applied).`);
       continue;
@@ -413,9 +496,9 @@ export const researchContactNode = async (state: typeof AgentState.State) => {
       console.log(`[SCOPE] Researching contacts at ${job.company}…`);
       const query = `${job.company} "Engineering Manager" OR "Technical Recruiter" OR "Head of Engineering" site:linkedin.com/in`;
       const rawResults = await tavilySearch.invoke({ query });
-      const resultsText = typeof rawResults === "string" ? rawResults : JSON.stringify(rawResults);
+      const resultsText =
+        typeof rawResults === "string" ? rawResults : JSON.stringify(rawResults);
 
-      // Ask Gemini to extract structured contact from the Tavily blurb
       const parseResponse = await llm.invoke([
         {
           role: "user",
@@ -424,7 +507,7 @@ Respond with ONLY a JSON object (no markdown):
 {"name": "Full Name or null", "role": "their job title or null", "linkedInUrl": "https://linkedin.com/in/... or null"}
 
 TEXT:
-${resultsText.slice(0, 4000)}`,
+${resultsText.slice(0, 4_000)}`,
         },
       ]);
 
@@ -447,18 +530,13 @@ ${resultsText.slice(0, 4000)}`,
       }
     } catch (err: any) {
       console.warn(`[SCOPE] Contact research failed for ${job.company}: ${err.message}`);
-      // Still add a stub so draftOutreach doesn't miss this company
       contacts.push({ company: job.company, jobTitle: job.title });
     }
   }
 
   const summary = `[Contact Research] Found contacts for ${contacts.filter((c) => c.contactName).length} / ${matchedJobs.length} companies.`;
   console.log(`[SCOPE] ${summary}`);
-
-  return {
-    contacts,
-    messages: [new AIMessage(summary)],
-  };
+  return { contacts, messages: [new AIMessage(summary)] };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -476,7 +554,9 @@ export const draftOutreachNode = async (state: typeof AgentState.State) => {
   const drafts: Array<{ job: MatchedJob; contact?: ContactResult; emailBody: string }> = [];
 
   for (const job of matchedJobs) {
-    const contact = contacts.find((c) => c.company.toLowerCase() === job.company.toLowerCase());
+    const contact = contacts.find(
+      (c) => c.company.toLowerCase() === job.company.toLowerCase()
+    );
     const greeting = contact?.contactName
       ? `Hi ${contact.contactName.split(" ")[0]},`
       : "Hi there,";
@@ -485,15 +565,14 @@ export const draftOutreachNode = async (state: typeof AgentState.State) => {
 
 Candidate: Demian Sims — Full-Stack Engineer & AI Architect
 Key projects:
-- SIGNAL: Production RAG pipeline (LangChain, vector search, TypeScript)
-- TRACE: Behavioral AI / agent study framework
-- NOWHERE: LLM-powered email parsing pipeline  
-- LINR: AI-assisted liner note inference app
-Recent experience: NEC Laboratories America (AI-assisted workflows), Avandar Labs (DuckDB-WASM analytics)
-Stack: TypeScript, Node.js, React/Next.js, LangChain, LangGraph, Playwright, Supabase, AWS
+- SIGNAL: Production RAG pipeline for UAP (Unidentified Aerial Phenomena) documents (LangChain, TypeScript, vector search)
+- TRACE: Behavioral AI / agent study framework (agent orchestration, TypeScript)
+- NOWHERE: LLM-powered email parsing and triage pipeline
+Recent experience: NEC Laboratories America 2026 (AI-assisted research tooling), Olivie (React, React Native, Express), Rethink (React, React Native, Express)
+Stack: TypeScript, Node.js, Express, React, Next.js, React Native, LangChain, LangGraph, Playwright, Supabase, PostgreSQL, AWS
 
 Why this role is a strong fit: ${job.matchReason}
-${contact?.contactName ? `Contact name: ${contact.contactName} (${contact.contactRole})` : ""}
+${contact?.contactName ? `Contact name: ${contact.contactName} (${contact.contactRole ?? ""})` : ""}
 
 Start with: "${greeting}"
 Tone: confident, sincere, direct — no buzzwords or sycophancy.
@@ -511,12 +590,13 @@ Do NOT include a subject line.`;
     }
   }
 
-  // ── Send digest email ───────────────────────────────────────────────────────
   if (!process.env.GMAIL_USER || !process.env.GMAIL_PASS) {
     console.warn("[SCOPE] GMAIL_USER or GMAIL_PASS not set — skipping email send.");
     return {
       messages: [
-        new AIMessage(`[Draft Outreach] Generated ${drafts.length} draft(s) but GMAIL credentials not configured. Set GMAIL_USER and GMAIL_PASS (App Password).`),
+        new AIMessage(
+          `[Draft Outreach] Generated ${drafts.length} draft(s) but GMAIL credentials not configured. Set GMAIL_USER and GMAIL_PASS (App Password).`
+        ),
       ],
     };
   }
@@ -525,13 +605,16 @@ Do NOT include a subject line.`;
     service: "gmail",
     auth: {
       user: process.env.GMAIL_USER,
-      // Google displays App Passwords with spaces — strip them before passing to SMTP
       pass: (process.env.GMAIL_PASS ?? "").replace(/\s+/g, ""),
     },
   });
 
-  const dateLabel = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-  const subject = `🎯 SCOPE: ${drafts.length} Job Match${drafts.length !== 1 ? "es" : ""} for Your Review — ${dateLabel}`;
+  const dateLabel = new Date().toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+  const subject = `SCOPE: ${drafts.length} Job Match${drafts.length !== 1 ? "es" : ""} for Your Review — ${dateLabel}`;
 
   await transporter.sendMail({
     from: `"SCOPE Agent" <${process.env.GMAIL_USER}>`,
@@ -540,22 +623,7 @@ Do NOT include a subject line.`;
     html: buildDigestHtml(drafts, new Date()),
   });
 
-  const successMsg = `[Draft Outreach] ✅ Digest email sent to ${process.env.GMAIL_USER} with ${drafts.length} draft(s).`;
+  const successMsg = `[Draft Outreach] Digest email sent to ${process.env.GMAIL_USER} with ${drafts.length} draft(s).`;
   console.log(`[SCOPE] ${successMsg}`);
-
-  return {
-    messages: [new AIMessage(successMsg)],
-  };
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Conditional edge helper
-// ─────────────────────────────────────────────────────────────────────────────
-export const shouldContinue = (state: typeof AgentState.State) => {
-  const { messages } = state;
-  const lastMessage = messages[messages.length - 1];
-  if (lastMessage instanceof AIMessage && lastMessage.tool_calls?.length) {
-    return "tools";
-  }
-  return "checkAppliedHistory";
+  return { messages: [new AIMessage(successMsg)] };
 };
