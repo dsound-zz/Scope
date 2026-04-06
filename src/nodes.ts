@@ -407,11 +407,20 @@ JOB LEADS (from search results and scraped pages):
 ${jobLeadsText.slice(0, 14_000)}
 
 Score each eligible job 1–10 based on alignment with the candidate. Scoring criteria:
+
+STRONG SIGNALS (raise score):
 - LLM orchestration / RAG pipelines (SIGNAL project — LangChain, TypeScript, vector search)
 - Behavioral / agentic AI systems (TRACE project)
 - Email parsing with LLMs (NOWHERE project)
 - Full-stack TypeScript / React / React Native / Node.js / Express (Olivie, Rethink)
 - AI-assisted research tooling (NEC Laboratories America, 2026)
+- TypeScript as a primary language requirement
+
+DISQUALIFYING SIGNALS (score ≤2):
+- Primary language is Python with no TypeScript (this candidate does not write Python)
+- Role requires training or fine-tuning foundational/LLM models (model training, multi-GPU, deep learning, PyTorch)
+- Role is at a hedge fund, quant trading firm, or financial research firm (e.g. Vatic, Two Sigma, Citadel)
+- Role is pure ML research with no product or full-stack engineering component
 - LOCATION FILTER: MUST be New York City metro area OR US-remote. Penalize non-NYC, non-remote roles to ≤3.
 - SITE FILTER: MUST come from LinkedIn, Indeed, BuiltInNYC, or Google Jobs. Ignore all others.
 
