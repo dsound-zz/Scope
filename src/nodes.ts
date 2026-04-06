@@ -167,11 +167,12 @@ export const searchNode = async (_state: typeof AgentState.State) => {
   }
 
   // Each query targets exactly one approved site and hard-pins New York City.
+  // Broader roles (software/frontend/fullstack engineer) require TypeScript to filter signal from noise.
   const queries: string[] = [
-    'site:linkedin.com/jobs "New York City" (TypeScript OR "AI engineer" OR "full stack engineer" OR LangChain OR "machine learning engineer")',
-    'site:indeed.com "New York, NY" (TypeScript OR LangChain OR "AI engineer" OR "full stack" OR "software engineer")',
-    'site:builtinnyc.com (TypeScript OR "AI engineer" OR "full stack" OR LangChain OR "machine learning")',
-    'site:jobs.google.com "New York City" (TypeScript OR "AI engineer" OR LangChain OR "full stack engineer")',
+    'site:linkedin.com/jobs "New York City" ("AI engineer" OR (TypeScript AND ("software engineer" OR "frontend engineer" OR "full stack engineer" OR "fullstack engineer")) OR LangChain OR "machine learning engineer")',
+    'site:indeed.com "New York, NY" ("AI engineer" OR (TypeScript AND ("software engineer" OR "frontend engineer" OR "full stack engineer" OR "fullstack engineer")) OR LangChain)',
+    'site:builtinnyc.com ("AI engineer" OR (TypeScript AND ("software engineer" OR "frontend engineer" OR "full stack engineer" OR "fullstack engineer")) OR LangChain OR "machine learning")',
+    'site:jobs.google.com "New York City" ("AI engineer" OR (TypeScript AND ("software engineer" OR "frontend engineer" OR "full stack engineer" OR "fullstack engineer")) OR LangChain)',
   ];
 
   const tavily = new TavilySearch({
