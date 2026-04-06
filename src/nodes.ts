@@ -90,8 +90,12 @@ function getGoogleAuth(): InstanceType<typeof google.auth.GoogleAuth> | null {
   });
 }
 
+function esc(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function buildDigestHtml(
-  drafts: Array<{ job: MatchedJob; contact?: ContactResult; emailBody: string }>,
+  drafts: Array<{ job: MatchedJob; contact?: ContactResult; emailBody: string; linkedInNote: string }>,
   date: Date
 ): string {
   const dateStr = date.toLocaleDateString("en-US", {
@@ -102,48 +106,53 @@ function buildDigestHtml(
   });
 
   const items = drafts
-    .map(
-      (d, i) => `
-      <div style="background:#f9fafb;border-left:4px solid #6366f1;padding:20px;margin:20px 0;border-radius:6px;">
-        <h2 style="margin:0 0 6px;color:#1e1b4b;font-size:18px;">
-          ${i + 1}. ${d.job.title} @ <span style="color:#6366f1;">${d.job.company}</span>
-          <span style="font-size:14px;color:#059669;margin-left:8px;">Score: ${d.job.score}/10</span>
-        </h2>
-        <p style="margin:4px 0;color:#6b7280;font-size:13px;">&#x1F4A1; ${d.job.matchReason}</p>
-        ${
-          d.contact?.contactName
-            ? `<p style="margin:6px 0;font-size:13px;">
-                &#x1F464; Contact: <strong>${d.contact.contactName}</strong> (${d.contact.contactRole ?? "Engineering"})
-                ${d.contact.linkedInUrl ? `&#x2014; <a href="${d.contact.linkedInUrl}" style="color:#6366f1;">LinkedIn</a>` : ""}
-               </p>`
-            : ""
-        }
-        ${
-          d.job.url
-            ? `<p style="margin:4px 0;font-size:13px;">&#x1F517; <a href="${d.job.url}" style="color:#6366f1;">View Job Posting</a></p>`
-            : ""
-        }
-        <hr style="margin:14px 0;border:none;border-top:1px solid #e5e7eb;">
-        <h3 style="margin:0 0 8px;color:#374151;font-size:15px;">&#x2709;&#xFE0F; Draft Outreach Email</h3>
-        <div style="background:white;padding:16px;border-radius:4px;font-family:ui-monospace,monospace;font-size:13px;white-space:pre-wrap;border:1px solid #e5e7eb;line-height:1.6;">${d.emailBody
-          .trim()
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")}</div>
-        <p style="margin:10px 0 0;font-size:12px;color:#9ca3af;">Review, personalize, and send manually if you approve.</p>
-      </div>`
-    )
+    .map((d, i) => {
+      const contactBlock = d.contact?.contactName
+        ? `<p style="margin:6px 0 2px;font-size:14px;">
+            <strong>Contact:</strong> ${esc(d.contact.contactName)}${d.contact.contactRole ? ` &mdash; ${esc(d.contact.contactRole)}` : ""}
+            ${d.contact.linkedInUrl ? ` &nbsp;<a href="${d.contact.linkedInUrl}" style="color:#6366f1;">LinkedIn Profile</a>` : ""}
+           </p>`
+        : `<p style="margin:6px 0 2px;font-size:14px;color:#9ca3af;">No contact found &mdash; consider searching manually.</p>`;
+
+      const jobLink = d.job.url
+        ? `<a href="${d.job.url}" style="color:#6366f1;font-weight:600;font-size:15px;">View Job Posting &rarr;</a>`
+        : "";
+
+      return `
+      <div style="border:1px solid #e5e7eb;border-radius:8px;padding:24px;margin:20px 0;">
+
+        <h2 style="margin:0 0 4px;font-size:20px;color:#111827;">${i + 1}. ${esc(d.job.title)}</h2>
+        <p style="margin:0 0 12px;font-size:16px;color:#6366f1;font-weight:600;">${esc(d.job.company)}</p>
+
+        ${jobLink}
+
+        <hr style="margin:16px 0;border:none;border-top:1px solid #f3f4f6;">
+
+        ${contactBlock}
+
+        <hr style="margin:16px 0;border:none;border-top:1px solid #f3f4f6;">
+
+        <h3 style="margin:0 0 8px;font-size:14px;color:#374151;text-transform:uppercase;letter-spacing:.05em;">Email Outreach</h3>
+        <div style="background:#f9fafb;padding:16px;border-radius:6px;font-size:14px;white-space:pre-wrap;line-height:1.7;color:#1f2937;">${esc(d.emailBody.trim())}</div>
+
+        <h3 style="margin:20px 0 8px;font-size:14px;color:#374151;text-transform:uppercase;letter-spacing:.05em;">LinkedIn Connect Note <span style="font-weight:400;color:#9ca3af;">(under 300 chars)</span></h3>
+        <div style="background:#f0fdf4;padding:14px;border-radius:6px;font-size:14px;line-height:1.6;color:#1f2937;border-left:3px solid #22c55e;">${esc(d.linkedInNote.trim())}</div>
+        <p style="margin:6px 0 0;font-size:12px;color:#9ca3af;">${d.linkedInNote.trim().length} chars</p>
+
+      </div>`;
+    })
     .join("");
 
   return `<!DOCTYPE html>
 <html>
-<body style="font-family:system-ui,-apple-system,sans-serif;max-width:760px;margin:0 auto;padding:32px;color:#111827;background:#fff;">
-  <div style="border-bottom:2px solid #6366f1;padding-bottom:16px;margin-bottom:24px;">
-    <h1 style="color:#4f46e5;margin:0 0 6px;font-size:24px;">SCOPE Daily Report</h1>
-    <p style="color:#6b7280;margin:0;">${dateStr} &middot; ${drafts.length} high-scoring match${drafts.length !== 1 ? "es" : ""} ready for your review</p>
+<body style="font-family:system-ui,-apple-system,sans-serif;max-width:680px;margin:0 auto;padding:32px;color:#111827;background:#fff;">
+  <div style="border-bottom:2px solid #6366f1;padding-bottom:16px;margin-bottom:8px;">
+    <h1 style="color:#4f46e5;margin:0 0 4px;font-size:22px;">SCOPE</h1>
+    <p style="color:#6b7280;margin:0;font-size:14px;">${dateStr} &middot; ${drafts.length} match${drafts.length !== 1 ? "es" : ""}</p>
   </div>
   ${items}
   <p style="color:#d1d5db;font-size:11px;margin-top:32px;border-top:1px solid #f3f4f6;padding-top:16px;">
-    Generated by SCOPE Autonomous Job Agent &middot; Do not reply to this message.
+    SCOPE Autonomous Job Agent
   </p>
 </body>
 </html>`;
@@ -561,7 +570,7 @@ export const draftOutreachNode = async (state: typeof AgentState.State) => {
     };
   }
 
-  const drafts: Array<{ job: MatchedJob; contact?: ContactResult; emailBody: string }> = [];
+  const drafts: Array<{ job: MatchedJob; contact?: ContactResult; emailBody: string; linkedInNote: string }> = [];
 
   for (const job of matchedJobs) {
     const contact = contacts.find(
@@ -589,14 +598,22 @@ Tone: confident, sincere, direct — no buzzwords or sycophancy.
 End with a single low-pressure CTA (e.g., "Happy to share more if this seems like a fit.").
 Do NOT include a subject line.`;
 
+    const linkedInPrompt = `Write a LinkedIn connection request note (strictly under 300 characters) from Demian Sims to ${contact?.contactName ? contact.contactName.split(" ")[0] : "someone"} at ${job.company} about the ${job.title} role.
+Tone: brief, human, not salesy. Mention one specific thing that makes this a genuine fit: ${job.matchReason}
+Output only the note text — no quotes, no label, no extra commentary.`;
+
     try {
-      const response = await llm.invoke([{ role: "user", content: draftPrompt }]);
-      const emailBody = typeof response.content === "string" ? response.content : "";
-      drafts.push({ job, contact, emailBody });
-      console.log(`[SCOPE] Drafted email for ${job.company}`);
+      const [emailResponse, linkedInResponse] = await Promise.all([
+        llm.invoke([{ role: "user", content: draftPrompt }]),
+        llm.invoke([{ role: "user", content: linkedInPrompt }]),
+      ]);
+      const emailBody = typeof emailResponse.content === "string" ? emailResponse.content : "";
+      const linkedInNote = typeof linkedInResponse.content === "string" ? linkedInResponse.content : "";
+      drafts.push({ job, contact, emailBody, linkedInNote });
+      console.log(`[SCOPE] Drafted email + LinkedIn note for ${job.company}`);
     } catch (err: any) {
       console.warn(`[SCOPE] Draft failed for ${job.company}: ${err.message}`);
-      drafts.push({ job, contact, emailBody: "[Draft generation failed — write manually.]" });
+      drafts.push({ job, contact, emailBody: "[Draft generation failed — write manually.]", linkedInNote: "[LinkedIn note generation failed.]" });
     }
   }
 
