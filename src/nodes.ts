@@ -596,19 +596,30 @@ ${contact?.contactName ? `Contact name: ${contact.contactName} (${contact.contac
 Start with: "${greeting}"
 Tone: confident, sincere, direct — no buzzwords or sycophancy.
 End with a single low-pressure CTA (e.g., "Happy to share more if this seems like a fit.").
-Do NOT include a subject line.`;
+Do NOT include a subject line.
+
+IMPORTANT: Your entire response must contain only the email text — no analysis, no JSON, no commentary, no preamble. Wrap your response exactly like this:
+EMAIL_START
+[email text here]
+EMAIL_END`;
 
     const linkedInPrompt = `Write a LinkedIn connection request note (strictly under 300 characters) from Demian Sims to ${contact?.contactName ? contact.contactName.split(" ")[0] : "someone"} at ${job.company} about the ${job.title} role.
 Tone: brief, human, not salesy. Mention one specific thing that makes this a genuine fit: ${job.matchReason}
-Output only the note text — no quotes, no label, no extra commentary.`;
+
+IMPORTANT: Your entire response must contain only the note text — no analysis, no JSON, no commentary. Wrap your response exactly like this:
+NOTE_START
+[note text here]
+NOTE_END`;
 
     try {
       const [emailResponse, linkedInResponse] = await Promise.all([
         llm.invoke([{ role: "user", content: draftPrompt }]),
         llm.invoke([{ role: "user", content: linkedInPrompt }]),
       ]);
-      const emailBody = typeof emailResponse.content === "string" ? emailResponse.content : "";
-      const linkedInNote = typeof linkedInResponse.content === "string" ? linkedInResponse.content : "";
+      const rawEmail = typeof emailResponse.content === "string" ? emailResponse.content : "";
+      const rawNote = typeof linkedInResponse.content === "string" ? linkedInResponse.content : "";
+      const emailBody = rawEmail.match(/EMAIL_START\s*([\s\S]*?)\s*EMAIL_END/)?.[1]?.trim() ?? rawEmail.trim();
+      const linkedInNote = rawNote.match(/NOTE_START\s*([\s\S]*?)\s*NOTE_END/)?.[1]?.trim() ?? rawNote.trim();
       drafts.push({ job, contact, emailBody, linkedInNote });
       console.log(`[SCOPE] Drafted email + LinkedIn note for ${job.company}`);
     } catch (err: any) {
