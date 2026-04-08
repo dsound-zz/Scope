@@ -87,7 +87,9 @@ Core Stack: TypeScript, Node.js, Express, React, Next.js, React Native,
 async function main() {
   console.log("--- SCOPE Agent — Dev Run ---");
 
-  const threadId = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+  // Dev runs use a full timestamp so each run is independent (no checkpoint replay).
+  // Cron runs (cron.ts) still use YYYY-MM-DD so same-day re-runs resume from checkpoint.
+  const threadId = new Date().toISOString().replace(/[:.]/g, "-"); // e.g. 2026-04-08T11-30-00-000Z
 
   const input = {
     messages: [],

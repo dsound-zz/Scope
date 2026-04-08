@@ -242,27 +242,45 @@ export const checkAppliedHistoryNode = async (_state: typeof AgentState.State) =
   try {
     const sheets = google.sheets({ version: "v4", auth });
 
-    // Column A only — company names are the source of truth for rejections
+    // Fetch all columns so we can locate headers dynamically
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: REJECTION_SHEET_ID,
-      range: "By Company!A:A",
+      range: "job_tracker",
     });
 
     const rows = response.data.values ?? [];
+    if (rows.length === 0) {
+      const msg = "[Sheets guardrail] Sheet is empty — all leads are eligible.";
+      console.log(`[SCOPE] ${msg}`);
+      return { skippedCompanies: [] as string[], messages: [new AIMessage(msg)] };
+    }
 
-    // Skip header row (row 0); read only column A (index 0)
+    const headers = rows[0].map((h: string) => h?.toString().toLowerCase().trim());
+    const companyColIndex = 2; // Column C (0-indexed)
+    const cooldownColIndex = headers.indexOf("cooldown_flag");
+
+    console.log(
+      `[SCOPE] Sheets: company=col C (index ${companyColIndex}), cooldown_flag=col index ${cooldownColIndex === -1 ? "NOT FOUND — skipping cooldown check" : cooldownColIndex}`
+    );
+
+    // Only skip companies explicitly flagged — others are still eligible even if previously applied
     const appliedCompanies: string[] = [
       ...new Set(
         rows
-          .slice(1)
-          .map((row: string[]) => row[0]?.toString().toLowerCase().trim())
+          .slice(1) // skip header row
+          .filter((row: string[]) => {
+            if (cooldownColIndex === -1) return false; // no cooldown column found — skip nothing
+            const flag = row[cooldownColIndex]?.toString().trim().toUpperCase();
+            return flag === "YES - DO NOT CONTACT";
+          })
+          .map((row: string[]) => row[companyColIndex]?.toString().toLowerCase().trim())
           .filter(Boolean)
       ),
     ];
 
     const msg =
       appliedCompanies.length > 0
-        ? `[Sheets guardrail] Already applied/rejected at ${appliedCompanies.length} companies. Skipping: ${appliedCompanies.slice(0, 8).join(", ")}${appliedCompanies.length > 8 ? "…" : ""}`
+        ? `[Sheets guardrail] Skipping ${appliedCompanies.length} companies from tracker. First 8: ${appliedCompanies.slice(0, 8).join(", ")}${appliedCompanies.length > 8 ? "…" : ""}`
         : "[Sheets guardrail] No previously-applied companies found — all leads are eligible.";
 
     console.log(`[SCOPE] ${msg}`);
@@ -295,13 +313,22 @@ export const scrapeNode = async (state: typeof AgentState.State) => {
 
   const eligibleUrls = [
     ...new Set(
-      rawUrls.filter(
-        (url) =>
-          APPROVED_DOMAINS.some((d) => url.includes(d)) &&
-          !SCRAPE_BLOCKLIST.some((d) => url.includes(d))
-      )
+      rawUrls.filter((url) => {
+        if (!APPROVED_DOMAINS.some((d) => url.includes(d))) return false;
+        if (SCRAPE_BLOCKLIST.some((d) => url.includes(d))) return false;
+        // BuiltInNYC: only scrape individual job pages (/job/<slug>/<id>), not category/search pages (/jobs/...)
+        if (url.includes("builtinnyc.com") && !url.match(/builtinnyc\.com\/job\/[^/]+\/\d+/)) return false;
+        // LinkedIn: only scrape individual job views, not search results
+        if (url.includes("linkedin.com") && !url.includes("/jobs/view/")) return false;
+        // Indeed: only scrape job pages, not search results
+        if (url.includes("indeed.com") && !url.match(/indeed\.com\/(viewjob|rc\/clk|pagead\/clk)/)) return false;
+        return true;
+      })
     ),
   ].slice(0, 5); // cap at 5 to avoid excessive run time
+
+  console.log(`[SCOPE] Eligible job URLs to scrape: ${eligibleUrls.length}`);
+  if (eligibleUrls.length > 0) eligibleUrls.forEach((u) => console.log(`  → ${u}`));
 
   if (eligibleUrls.length === 0) {
     return {
@@ -383,6 +410,7 @@ export const scrapeNode = async (state: typeof AgentState.State) => {
 // ─────────────────────────────────────────────────────────────────────────────
 export const matchNode = async (state: typeof AgentState.State) => {
   const skipped = state.skippedCompanies ?? [];
+  console.log(`[SCOPE] matchNode: ${skipped.length} companies in skip list.`);
 
   const jobLeadsText = state.messages
     .filter((m: any) => {
@@ -394,6 +422,8 @@ export const matchNode = async (state: typeof AgentState.State) => {
     )
     .filter((c: string) => c.trim().length > 20)
     .join("\n\n---\n\n");
+
+  console.log(`[SCOPE] matchNode: ${jobLeadsText.length} chars of job content to score.`);
 
   if (!jobLeadsText) {
     console.warn("[SCOPE] matchNode: No job lead content found in messages.");
