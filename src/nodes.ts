@@ -17,7 +17,7 @@ dotenv.config();
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Sheet ID for the applied/rejection tracker */
-const REJECTION_SHEET_ID = "1ip0NQkpQi3ovk2OeNy9aPbRpeIEs7ZNRwz5EtHDvZgU";
+const REJECTION_SHEET_ID = process.env.GOOGLE_SHEET_ID || "1ip0NQkpQi3ovk2OeNy9aPbRpeIEs7ZNRwz5EtHDvZgU";
 
 /** Approved job board domains — all other sites are ignored */
 const APPROVED_DOMAINS = [
