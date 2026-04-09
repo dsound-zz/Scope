@@ -62,7 +62,7 @@ export const app = workflow.compile({ checkpointer });
 // ─────────────────────────────────────────────────────────────────────────────
 export const CANDIDATE_PROFILE = `
 Name: Demian Sims
-Role: Full-Stack Engineer & AI Architect
+Role: TypeScript Engineer — Agentic AI, RAG Systems & Frontend
 
 Key Projects:
   - SIGNAL: Production RAG pipeline for UAP (Unidentified Aerial Phenomena) documents
@@ -76,8 +76,8 @@ Recent Experience:
   - Olivie — React, React Native, Express product engineering
   - Rethink — React, React Native, Express engineering
 
-Core Stack: TypeScript, Node.js, Express, React, Next.js, React Native,
-            LangChain, LangGraph, Playwright, Supabase, PostgreSQL, AWS
+Core Stack: TypeScript, Node.js, LangChain, LangGraph, Playwright,
+            React, Next.js, React Native, Express, Supabase, PostgreSQL, AWS
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────

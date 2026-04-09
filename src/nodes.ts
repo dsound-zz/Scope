@@ -26,6 +26,8 @@ const APPROVED_DOMAINS = [
   "indeed.com",
   "builtinnyc.com",
   "jobs.google.com",
+  "wellfound.com",
+  "workatastartup.com",
 ];
 
 /** Domains that should never be scraped (error pages, auth redirects, API consoles) */
@@ -176,13 +178,15 @@ export const searchNode = async (_state: typeof AgentState.State) => {
     return { messages: [new AIMessage(msg)] };
   }
 
-  // Each query targets exactly one approved site and hard-pins New York City.
+  // Each query targets exactly one approved site and hard-pins New York City or Remote.
   // Broader roles (software/frontend/fullstack engineer) require TypeScript to filter signal from noise.
   const queries: string[] = [
     'site:linkedin.com/jobs "New York City" ("AI engineer" OR (TypeScript AND ("software engineer" OR "frontend engineer" OR "full stack engineer" OR "fullstack engineer")) OR LangChain OR "machine learning engineer")',
     'site:indeed.com "New York, NY" ("AI engineer" OR (TypeScript AND ("software engineer" OR "frontend engineer" OR "full stack engineer" OR "fullstack engineer")) OR LangChain)',
     'site:builtinnyc.com ("AI engineer" OR (TypeScript AND ("software engineer" OR "frontend engineer" OR "full stack engineer" OR "fullstack engineer")) OR LangChain OR "machine learning")',
     'site:jobs.google.com "New York City" ("AI engineer" OR (TypeScript AND ("software engineer" OR "frontend engineer" OR "full stack engineer" OR "fullstack engineer")) OR LangChain)',
+    'site:wellfound.com/jobs ("New York" OR "Remote") ("AI engineer" OR "frontend engineer" OR (TypeScript AND ("software engineer" OR "full stack engineer" OR "fullstack engineer")) OR LangChain)',
+    'site:workatastartup.com ("New York" OR "Remote") ("AI engineer" OR "frontend engineer" OR (TypeScript AND ("software engineer" OR "full stack engineer" OR "fullstack engineer")) OR LangChain)',
   ];
 
   const tavily = new TavilySearch({
@@ -323,6 +327,10 @@ export const scrapeNode = async (state: typeof AgentState.State) => {
         if (url.includes("linkedin.com") && !url.includes("/jobs/view/")) return false;
         // Indeed: only scrape job pages, not search results
         if (url.includes("indeed.com") && !url.match(/indeed\.com\/(viewjob|rc\/clk|pagead\/clk)/)) return false;
+        // Wellfound: only scrape individual job pages, not search/browse pages
+        if (url.includes("wellfound.com") && !url.match(/wellfound\.com\/(jobs\/\d|l\/|company\/[^/]+\/jobs\/)/)) return false;
+        // YC Work at a Startup: only scrape individual job pages
+        if (url.includes("workatastartup.com") && !url.match(/workatastartup\.com\/jobs\/\d+/)) return false;
         return true;
       })
     ),
@@ -449,20 +457,21 @@ ${jobLeadsText.slice(0, 14_000)}
 Score each eligible job 1–10 based on alignment with the candidate. Scoring criteria:
 
 STRONG SIGNALS (raise score):
-- LLM orchestration / RAG pipelines (SIGNAL project — LangChain, TypeScript, vector search)
-- Behavioral / agentic AI systems (TRACE project)
-- Email parsing with LLMs (NOWHERE project)
-- Full-stack TypeScript / React / React Native / Node.js / Express (Olivie, Rethink)
-- AI-assisted research tooling (NEC Laboratories America, 2026)
-- TypeScript as a primary language requirement
+- TypeScript as the primary language — this is the single most important signal
+- Agentic AI systems, agent orchestration, or multi-agent frameworks (TRACE project, LangGraph)
+- RAG pipelines, vector search, or LLM-powered data retrieval (SIGNAL project — LangChain, embeddings)
+- LLM application engineering: prompt pipelines, tool use, structured output, evals
+- AI-assisted research or internal tooling (NEC Laboratories America, 2026)
+- Frontend or full-stack TypeScript roles: React, React Native, Next.js — this is core experience, not a stretch
 
 DISQUALIFYING SIGNALS (score ≤2):
+- TITLE FILTER: Role title is or closely resembles "Data Scientist", "Research Scientist", "Quantitative Researcher", or "Statistician" — these are not engineering roles and are not a fit regardless of tech stack.
 - Primary language is Python with no TypeScript (this candidate does not write Python)
 - Role requires training or fine-tuning foundational/LLM models (model training, multi-GPU, deep learning, PyTorch)
 - Role is at a hedge fund, quant trading firm, or financial research firm (e.g. Vatic, Two Sigma, Citadel)
 - Role is pure ML research with no product or full-stack engineering component
 - LOCATION FILTER: MUST be New York City metro area OR US-remote. Penalize non-NYC, non-remote roles to ≤3.
-- SITE FILTER: MUST come from LinkedIn, Indeed, BuiltInNYC, or Google Jobs. Ignore all others.
+- SITE FILTER: MUST come from LinkedIn, Indeed, BuiltInNYC, Google Jobs, Wellfound, or YC Work at a Startup. Ignore all others.
 
 Output EXACTLY this JSON block first (raw JSON, no markdown fences):
 
@@ -621,13 +630,13 @@ export const draftOutreachNode = async (state: typeof AgentState.State) => {
 
     const draftPrompt = `Write a short cold outreach email (120–150 words) for a software engineer applying to the ${job.title} role at ${job.company}.
 
-Candidate: Demian Sims — Full-Stack Engineer & AI Architect
+Candidate: Demian Sims — TypeScript Engineer specializing in agentic AI, RAG systems, and frontend development
 Key projects:
-- SIGNAL: Production RAG pipeline for UAP (Unidentified Aerial Phenomena) documents (LangChain, TypeScript, vector search)
-- TRACE: Behavioral AI / agent study framework (agent orchestration, TypeScript)
+- SIGNAL: Production RAG pipeline (LangChain, TypeScript, vector search, embeddings)
+- TRACE: Behavioral AI / agentic study framework (agent orchestration, LangGraph, TypeScript)
 - NOWHERE: LLM-powered email parsing and triage pipeline
 Recent experience: NEC Laboratories America 2026 (AI-assisted research tooling), Olivie (React, React Native, Express), Rethink (React, React Native, Express)
-Stack: TypeScript, Node.js, Express, React, Next.js, React Native, LangChain, LangGraph, Playwright, Supabase, PostgreSQL, AWS
+Stack: TypeScript, Node.js, LangChain, LangGraph, React, Next.js, React Native, Express, Supabase, PostgreSQL, AWS
 
 Why this role is a strong fit: ${job.matchReason}
 ${contact?.contactName ? `Contact name: ${contact.contactName} (${contact.contactRole ?? ""})` : ""}
