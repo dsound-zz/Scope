@@ -4,4 +4,5 @@ dist/
 
 service-account.json
 scope_memory.db
+scope_memory.db-*
 .vercel
