@@ -9,6 +9,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as dotenv from "dotenv";
 import type { MatchedJob, ContactResult } from "./types.js";
+import { filterNewJobs, markJobsSeen } from "./seenJobs.js";
 
 dotenv.config();
 
@@ -600,9 +601,17 @@ export const draftOutreachNode = async (state: typeof AgentState.State) => {
     };
   }
 
+  const newJobs = filterNewJobs(matchedJobs);
+  if (newJobs.length === 0) {
+    const msg = `[Draft Outreach] All ${matchedJobs.length} match(es) already sent in a previous digest — skipping email.`;
+    console.log(`[SCOPE] ${msg}`);
+    return { messages: [new AIMessage(msg)] };
+  }
+  console.log(`[SCOPE] draftOutreachNode: ${newJobs.length} new job(s) out of ${matchedJobs.length} match(es).`);
+
   const drafts: Array<{ job: MatchedJob; contact?: ContactResult; emailBody: string; linkedInNote: string }> = [];
 
-  for (const job of matchedJobs) {
+  for (const job of newJobs) {
     const contact = contacts.find(
       (c) => c.company.toLowerCase() === job.company.toLowerCase()
     );
@@ -690,6 +699,8 @@ NOTE_END`;
     subject,
     html: buildDigestHtml(drafts, new Date()),
   });
+
+  markJobsSeen(newJobs);
 
   const successMsg = `[Draft Outreach] Digest email sent to ${process.env.GMAIL_USER} with ${drafts.length} draft(s).`;
   console.log(`[SCOPE] ${successMsg}`);

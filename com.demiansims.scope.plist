@@ -91,14 +91,28 @@
     <string>/Users/demiansims/Library/Caches/ms-playwright</string>
   </dict>
 
-  <!-- Fire every day at 08:00 local time -->
+  <!-- Fire 3× per day: 8 AM, 12 PM, 5 PM local time -->
   <key>StartCalendarInterval</key>
-  <dict>
-    <key>Hour</key>
-    <integer>8</integer>
-    <key>Minute</key>
-    <integer>0</integer>
-  </dict>
+  <array>
+    <dict>
+      <key>Hour</key>
+      <integer>8</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+    <dict>
+      <key>Hour</key>
+      <integer>12</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+    <dict>
+      <key>Hour</key>
+      <integer>17</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+  </array>
 
   <!-- Do NOT run immediately when the plist is loaded (only on schedule) -->
   <key>RunAtLoad</key>

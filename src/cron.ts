@@ -39,7 +39,9 @@ async function runDailySearch(): Promise<void> {
     process.exit(1);
   }
 
-  const threadId = new Date().toISOString().split("T")[0]; // e.g. "2026-04-03"
+  // Use a full timestamp so each run gets its own checkpoint — no same-day replay.
+  // Cross-run deduplication is handled by the seenJobs store in draftOutreachNode.
+  const threadId = new Date().toISOString().replace(/[:.]/g, "-"); // e.g. "2026-04-08T08-00-00-000Z"
   const now = new Date().toLocaleString("en-US", { timeZone: "America/New_York" });
 
   console.log("╔══════════════════════════════════════════╗");
