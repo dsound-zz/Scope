@@ -36,7 +36,7 @@ jobs:
 
       # ── Run SCOPE ────────────────────────────────────────────────────────────
       - name: Run SCOPE daily agent
-        run: npx ts-node src/cron.ts
+        run: npx tsx src/cron.ts
         env:
           # Core API keys
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
